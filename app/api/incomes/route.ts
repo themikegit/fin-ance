@@ -4,11 +4,45 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const sb = getSupabaseAdmin();
+  const scope = new URL(req.url).searchParams.get("space_id");
+
+  if (scope) {
+    const { data: caller, error: cErr } = await sb
+      .from("space_members")
+      .select("id")
+      .eq("space_id", scope)
+      .eq("user_id", userId)
+      .eq("status", "accepted")
+      .maybeSingle();
+    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
+    if (!caller) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+    const { data: members, error: mErr } = await sb
+      .from("space_members")
+      .select("user_id")
+      .eq("space_id", scope)
+      .eq("status", "accepted");
+    if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
+
+    const ids = (members ?? [])
+      .map((m) => m.user_id as string | null)
+      .filter((id): id is string => !!id);
+    if (ids.length === 0) return NextResponse.json({ incomes: [] });
+
+    const { data, error } = await sb
+      .from("incomes")
+      .select("*")
+      .in("user_id", ids)
+      .order("created_at", { ascending: false });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ incomes: data ?? [] });
+  }
+
   const { data, error } = await sb
     .from("incomes")
     .select("*")

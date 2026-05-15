@@ -4,21 +4,6 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-async function memberUserIds(
-  sb: ReturnType<typeof getSupabaseAdmin>,
-  spaceId: string,
-): Promise<string[]> {
-  const { data, error } = await sb
-    .from("space_members")
-    .select("user_id")
-    .eq("space_id", spaceId)
-    .eq("status", "accepted");
-  if (error) throw new Error(error.message);
-  return (data ?? [])
-    .map((m) => m.user_id as string | null)
-    .filter((id): id is string => !!id);
-}
-
 export async function GET(req: Request) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -37,31 +22,35 @@ export async function GET(req: Request) {
     if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
     if (!caller) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-    let ids: string[];
-    try {
-      ids = await memberUserIds(sb, scope);
-    } catch (e) {
-      return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-    }
-    if (ids.length === 0) return NextResponse.json({ expenses: [] });
+    const { data: members, error: mErr } = await sb
+      .from("space_members")
+      .select("user_id")
+      .eq("space_id", scope)
+      .eq("status", "accepted");
+    if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
+
+    const ids = (members ?? [])
+      .map((m) => m.user_id as string | null)
+      .filter((id): id is string => !!id);
+    if (ids.length === 0) return NextResponse.json({ monthly_expenses: [] });
 
     const { data, error } = await sb
-      .from("expenses")
+      .from("monthly_expenses")
       .select("*")
       .in("user_id", ids)
       .order("created_at", { ascending: false });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ expenses: data ?? [] });
+    return NextResponse.json({ monthly_expenses: data ?? [] });
   }
 
   const { data, error } = await sb
-    .from("expenses")
+    .from("monthly_expenses")
     .select("*")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ expenses: data ?? [] });
+  return NextResponse.json({ monthly_expenses: data ?? [] });
 }
 
 export async function POST(req: Request) {
@@ -75,50 +64,43 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const { amount, category_id, name, created_at } = (body ?? {}) as {
+  const { label, amount, months } = (body ?? {}) as {
+    label?: unknown;
     amount?: unknown;
-    category_id?: unknown;
-    name?: unknown;
-    created_at?: unknown;
+    months?: unknown;
   };
 
+  if (typeof label !== "string" || !label.trim()) {
+    return NextResponse.json({ error: "invalid_label" }, { status: 400 });
+  }
   const numericAmount =
     typeof amount === "number" ? amount : Number.parseFloat(String(amount));
   if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
     return NextResponse.json({ error: "invalid_amount" }, { status: 400 });
   }
-  if (typeof category_id !== "string" || !category_id) {
-    return NextResponse.json({ error: "invalid_category" }, { status: 400 });
+
+  let resolvedMonths: number | null = null;
+  if (months !== undefined && months !== null && months !== "") {
+    const n =
+      typeof months === "number" ? months : Number.parseInt(String(months), 10);
+    if (!Number.isInteger(n) || n <= 0) {
+      return NextResponse.json({ error: "invalid_months" }, { status: 400 });
+    }
+    resolvedMonths = n;
   }
 
   const sb = getSupabaseAdmin();
-
-  const { data: category, error: cErr } = await sb
-    .from("categories")
-    .select("id")
-    .eq("id", category_id)
-    .maybeSingle();
-  if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
-  if (!category) {
-    return NextResponse.json({ error: "category_not_found" }, { status: 400 });
-  }
-
-  const insert: Record<string, unknown> = {
-    user_id: userId,
-    amount: numericAmount,
-    category_id: category.id,
-    name: typeof name === "string" && name.trim() ? name.trim() : null,
-  };
-  if (typeof created_at === "string" && created_at) {
-    insert.created_at = created_at;
-  }
-
   const { data, error } = await sb
-    .from("expenses")
-    .insert(insert)
+    .from("monthly_expenses")
+    .insert({
+      user_id: userId,
+      label: label.trim(),
+      amount: numericAmount,
+      months: resolvedMonths,
+    })
     .select()
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ expense: data }, { status: 201 });
+  return NextResponse.json({ monthly_expense: data }, { status: 201 });
 }

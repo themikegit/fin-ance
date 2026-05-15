@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import CategoryGrid from "@/components/CategoryGrid";
 import Toast from "@/components/Toast";
-import { createExpense } from "@/lib/client";
-import type { CategoryId } from "@/lib/categories";
+import { createExpense, fetchCategories } from "@/lib/client";
+import type { Category } from "@/lib/categories";
 import { formatRSD } from "@/lib/format";
 
 const QUICK = [500, 1000, 2000, 5000] as const;
@@ -17,10 +17,26 @@ export default function AddExpenseClient() {
   const [saving, setSaving] = useState<boolean>(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const cats = await fetchCategories();
+        if (!cancelled) setCategories(cats);
+      } catch {
+        // silent — show empty UI states
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const numeric = Number.parseFloat(amount);
@@ -48,14 +64,14 @@ export default function AddExpenseClient() {
     inputRef.current?.focus();
   };
 
-  const save = async (category: CategoryId) => {
+  const save = async (category: Category) => {
     if (!valid || saving) return;
     setSaving(true);
     setError(null);
     try {
       await createExpense({
         amount: numeric,
-        category,
+        category_id: category.id,
         name: name.trim() || null,
       });
       setToast(`Saved ${formatRSD(numeric)}`);
@@ -65,6 +81,11 @@ export default function AddExpenseClient() {
       setSaving(false);
     }
   };
+
+  const otherCategory =
+    categories.find((c) => c.name.toLowerCase() === "other") ??
+    categories[categories.length - 1] ??
+    null;
 
   return (
     <div className="mx-auto max-w-md px-4 pt-4">
@@ -150,16 +171,22 @@ export default function AddExpenseClient() {
               className="mb-4 w-full rounded-2xl border border-border bg-background px-4 py-3 text-base outline-none focus:border-brand"
             />
 
-            <CategoryGrid onPick={save} disabled={saving} />
-
-            <button
-              type="button"
-              onClick={() => save("other")}
+            <CategoryGrid
+              categories={categories}
+              onPick={save}
               disabled={saving}
-              className="mt-4 w-full rounded-2xl border border-border bg-surface-2 py-3 text-sm font-medium text-muted hover:text-foreground disabled:opacity-50"
-            >
-              Skip (save as Other)
-            </button>
+            />
+
+            {otherCategory ? (
+              <button
+                type="button"
+                onClick={() => save(otherCategory)}
+                disabled={saving}
+                className="mt-4 w-full rounded-2xl border border-border bg-surface-2 py-3 text-sm font-medium text-muted hover:text-foreground disabled:opacity-50"
+              >
+                Skip (save as {otherCategory.name})
+              </button>
+            ) : null}
           </div>
         </>
       ) : null}

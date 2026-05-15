@@ -1,23 +1,29 @@
-export const CATEGORIES = [
-  { id: "gas",         label: "Gas",         emoji: "⛽" },
-  { id: "groceries",   label: "Groceries",   emoji: "🛒" },
-  { id: "housing",     label: "Housing",     emoji: "🏠" },
-  { id: "pharmacy",    label: "Pharmacy",    emoji: "💊" },
-  { id: "bills",       label: "Bills",       emoji: "📄" },
-  { id: "restaurants", label: "Restaurants", emoji: "🍽️" },
-  { id: "other",       label: "Other",       emoji: "📦" },
-] as const;
+export type Category = {
+  id: string;
+  name: string;
+  created_at: string;
+};
 
-export type CategoryId = (typeof CATEGORIES)[number]["id"];
+const ACCENTS = [
+  "#22c55e",
+  "#3b82f6",
+  "#f97316",
+  "#a855f7",
+  "#ef4444",
+  "#eab308",
+  "#06b6d4",
+  "#ec4899",
+];
 
-export const CATEGORY_IDS = CATEGORIES.map((c) => c.id) as CategoryId[];
+export function categoryColor(id: string | null | undefined): string {
+  if (!id) return "#94a3b8";
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return ACCENTS[h % ACCENTS.length];
+}
 
-export const CATEGORY_BY_ID: Record<CategoryId, (typeof CATEGORIES)[number]> =
-  Object.fromEntries(CATEGORIES.map((c) => [c.id, c])) as Record<
-    CategoryId,
-    (typeof CATEGORIES)[number]
-  >;
-
-export function isCategoryId(value: unknown): value is CategoryId {
-  return typeof value === "string" && (CATEGORY_IDS as string[]).includes(value);
+export function categoryInitial(name: string | null | undefined): string {
+  if (!name) return "?";
+  const trimmed = name.trim();
+  return trimmed ? trimmed[0].toUpperCase() : "?";
 }

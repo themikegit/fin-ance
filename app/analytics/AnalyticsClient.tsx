@@ -13,7 +13,14 @@ import {
   Tooltip,
 } from "recharts";
 import MonthSwitcher from "@/components/MonthSwitcher";
-import { fetchExpenses, fetchIncomes } from "@/lib/client";
+import {
+  fetchCategories,
+  fetchExpenses,
+  fetchIncomes,
+  fetchMonthlyExpenses,
+  fetchSpaces,
+  fetchSpaceMembers,
+} from "@/lib/client";
 import {
   currentMonthKey,
   monthKey,
@@ -21,10 +28,17 @@ import {
   formatRSD,
   daysInMonth,
 } from "@/lib/format";
-import { CATEGORIES, CATEGORY_BY_ID, type CategoryId } from "@/lib/categories";
-import type { Expense, Income } from "@/lib/types";
+import { categoryColor, categoryInitial } from "@/lib/categories";
+import type {
+  Category,
+  Expense,
+  Income,
+  MonthlyExpense,
+  SpaceSummary,
+  SpaceMemberView,
+} from "@/lib/types";
 
-const COLORS = [
+const CATEGORY_COLORS = [
   "#22c55e",
   "#3b82f6",
   "#f97316",
@@ -34,9 +48,25 @@ const COLORS = [
   "#94a3b8",
 ];
 
+const MEMBER_COLORS = [
+  "#22c55e",
+  "#3b82f6",
+  "#f97316",
+  "#a855f7",
+  "#ef4444",
+  "#eab308",
+];
+
+type Scope = { kind: "personal" } | { kind: "space"; id: string };
+
 export default function AnalyticsClient() {
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [incomes, setIncomes] = useState<Income[] | null>(null);
+  const [fixed, setFixed] = useState<MonthlyExpense[]>([]);
+  const [spaces, setSpaces] = useState<SpaceSummary[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [members, setMembers] = useState<SpaceMemberView[]>([]);
+  const [scope, setScope] = useState<Scope>({ kind: "personal" });
   const [month, setMonth] = useState<string>(currentMonthKey());
   const [error, setError] = useState<string | null>(null);
 
@@ -44,13 +74,10 @@ export default function AnalyticsClient() {
     let cancelled = false;
     (async () => {
       try {
-        const [exps, incs] = await Promise.all([
-          fetchExpenses(),
-          fetchIncomes(),
-        ]);
+        const [sps, cats] = await Promise.all([fetchSpaces(), fetchCategories()]);
         if (cancelled) return;
-        setExpenses(exps);
-        setIncomes(incs);
+        setSpaces(sps);
+        setCategories(cats);
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
       }
@@ -59,6 +86,52 @@ export default function AnalyticsClient() {
       cancelled = true;
     };
   }, []);
+
+  const categoryById = useMemo(() => {
+    const m = new Map<string, Category>();
+    for (const c of categories) m.set(c.id, c);
+    return m;
+  }, [categories]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setError(null);
+      try {
+        if (scope.kind === "personal") {
+          const [exps, incs, fx] = await Promise.all([
+            fetchExpenses(),
+            fetchIncomes(),
+            fetchMonthlyExpenses(),
+          ]);
+          if (cancelled) return;
+          setExpenses(exps);
+          setIncomes(incs);
+          setFixed(fx);
+          setMembers([]);
+        } else {
+          const [exps, incs, fx, m] = await Promise.all([
+            fetchExpenses(scope.id),
+            fetchIncomes(scope.id),
+            fetchMonthlyExpenses(scope.id),
+            fetchSpaceMembers(scope.id),
+          ]);
+          if (cancelled) return;
+          setExpenses(exps);
+          setIncomes(incs);
+          setFixed(fx);
+          setMembers(m);
+        }
+      } catch (e) {
+        if (!cancelled) setError((e as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scope]);
+
+  const inSpace = scope.kind === "space";
 
   const monthExpenses = useMemo(
     () => (expenses ?? []).filter((e) => monthKey(e.created_at) === month),
@@ -76,19 +149,45 @@ export default function AnalyticsClient() {
     (s, i) => s + Number(i.amount),
     0,
   );
-  const balance = incomeTotal - monthTotal;
+  const fixedTotal = fixed.reduce((s, i) => s + Number(i.amount), 0);
+  const balance = incomeTotal - monthTotal - fixedTotal;
 
   const byCategory = useMemo(() => {
-    const map = new Map<CategoryId, number>();
+    const totals = new Map<string, { label: string; value: number }>();
     for (const e of monthExpenses) {
-      map.set(e.category, (map.get(e.category) ?? 0) + Number(e.amount));
+      const cat = e.category_id ? categoryById.get(e.category_id) : null;
+      const key = e.category_id ?? "uncategorized";
+      const label = cat?.name ?? "Uncategorized";
+      const prev = totals.get(key);
+      if (prev) {
+        prev.value += Number(e.amount);
+      } else {
+        totals.set(key, { label, value: Number(e.amount) });
+      }
     }
-    return CATEGORIES.filter((c) => (map.get(c.id) ?? 0) > 0).map((c) => ({
-      id: c.id,
-      label: `${c.emoji} ${c.label}`,
-      value: map.get(c.id) ?? 0,
-    }));
-  }, [monthExpenses]);
+    return [...totals.entries()]
+      .map(([id, v]) => ({ id, label: v.label, value: v.value }))
+      .sort((a, b) => b.value - a.value);
+  }, [monthExpenses, categoryById]);
+
+  const byMember = useMemo(() => {
+    if (!inSpace) return [];
+    const totals = new Map<string, number>();
+    for (const e of monthExpenses) {
+      totals.set(e.user_id, (totals.get(e.user_id) ?? 0) + Number(e.amount));
+    }
+    const nameById = new Map<string, string>();
+    for (const m of members) {
+      if (m.user_id) nameById.set(m.user_id, m.display_name);
+    }
+    return [...totals.entries()]
+      .map(([userId, value]) => ({
+        id: userId,
+        label: nameById.get(userId) ?? "Member",
+        value,
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [monthExpenses, members, inSpace]);
 
   const daily = useMemo(() => {
     const n = daysInMonth(month);
@@ -111,6 +210,14 @@ export default function AnalyticsClient() {
     [monthExpenses],
   );
 
+  const memberNameByUserId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const mem of members) {
+      if (mem.user_id) m.set(mem.user_id, mem.display_name);
+    }
+    return m;
+  }, [members]);
+
   const momPct =
     prevTotal === 0
       ? null
@@ -131,16 +238,41 @@ export default function AnalyticsClient() {
 
   return (
     <div className="mx-auto max-w-md px-4 pt-2 pb-6 space-y-4">
+      {spaces.length > 0 ? (
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+          <ScopeTab
+            label="Personal"
+            active={scope.kind === "personal"}
+            onClick={() => setScope({ kind: "personal" })}
+          />
+          {spaces.map((s) => (
+            <ScopeTab
+              key={s.id}
+              label={s.name}
+              active={scope.kind === "space" && scope.id === s.id}
+              onClick={() => setScope({ kind: "space", id: s.id })}
+            />
+          ))}
+        </div>
+      ) : null}
+
       <MonthSwitcher value={month} onChange={setMonth} />
 
-      <section className="rounded-2xl border border-border bg-surface p-4 grid grid-cols-3 gap-3">
-        <Stat label="Spent" value={formatRSD(monthTotal)} tone="neg" />
-        <Stat label="Income" value={formatRSD(incomeTotal)} tone="pos" />
-        <Stat
-          label="Balance"
-          value={formatRSD(balance)}
-          tone={balance >= 0 ? "pos" : "neg"}
-        />
+      <section className="rounded-2xl border border-border bg-surface p-4">
+        <div className="grid grid-cols-3 gap-3">
+          <Stat label="Spent" value={formatRSD(monthTotal)} tone="neg" />
+          <Stat label="Income" value={formatRSD(incomeTotal)} tone="pos" />
+          <Stat
+            label="Balance"
+            value={formatRSD(balance)}
+            tone={balance >= 0 ? "pos" : "neg"}
+          />
+        </div>
+        {fixedTotal > 0 ? (
+          <div className="mt-2 text-[11px] text-muted">
+            Balance is after {formatRSD(fixedTotal)} fixed monthly expenses.
+          </div>
+        ) : null}
       </section>
 
       {momPct !== null ? (
@@ -151,6 +283,73 @@ export default function AnalyticsClient() {
             {momPct}%
           </span>
         </div>
+      ) : null}
+
+      {inSpace ? (
+        <section className="rounded-2xl border border-border bg-surface p-4">
+          <h2 className="text-sm font-semibold mb-3">Spending by member</h2>
+          {byMember.length === 0 ? (
+            <p className="text-sm text-muted">No spending this month.</p>
+          ) : (
+            <>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={byMember}
+                      dataKey="value"
+                      nameKey="label"
+                      innerRadius={45}
+                      outerRadius={75}
+                      strokeWidth={0}
+                    >
+                      {byMember.map((_, i) => (
+                        <Cell
+                          key={i}
+                          fill={MEMBER_COLORS[i % MEMBER_COLORS.length]}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(v) => formatRSD(Number(v))}
+                      contentStyle={{
+                        borderRadius: 12,
+                        border: "1px solid var(--border)",
+                        background: "var(--surface)",
+                        color: "var(--foreground)",
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <ul className="mt-3 space-y-1">
+                {byMember.map((m, i) => {
+                  const pct = Math.round((m.value / monthTotal) * 100);
+                  return (
+                    <li
+                      key={m.id}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{
+                            background: MEMBER_COLORS[i % MEMBER_COLORS.length],
+                          }}
+                        />
+                        <span className="truncate">{m.label}</span>
+                      </div>
+                      <div className="tabular-nums shrink-0">
+                        {formatRSD(m.value)}{" "}
+                        <span className="text-muted">({pct}%)</span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </section>
       ) : null}
 
       <section className="rounded-2xl border border-border bg-surface p-4">
@@ -171,7 +370,10 @@ export default function AnalyticsClient() {
                     strokeWidth={0}
                   >
                     {byCategory.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      <Cell
+                        key={i}
+                        fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
+                      />
                     ))}
                   </Pie>
                   <Tooltip
@@ -197,7 +399,10 @@ export default function AnalyticsClient() {
                     <div className="flex items-center gap-2">
                       <span
                         className="h-2.5 w-2.5 rounded-full"
-                        style={{ background: COLORS[i % COLORS.length] }}
+                        style={{
+                          background:
+                            CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+                        }}
                       />
                       <span>{c.label}</span>
                     </div>
@@ -249,15 +454,30 @@ export default function AnalyticsClient() {
         ) : (
           <ul className="space-y-2">
             {topFive.map((e) => {
-              const cat = CATEGORY_BY_ID[e.category];
+              const cat = e.category_id ? categoryById.get(e.category_id) : null;
+              const catName = cat?.name || "Uncategorized";
+              const by = inSpace
+                ? memberNameByUserId.get(e.user_id) ?? "Member"
+                : null;
               return (
                 <li key={e.id} className="flex items-center gap-3 text-sm">
-                  <span className="text-lg" aria-hidden>
-                    {cat.emoji}
+                  <span
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold text-white shrink-0"
+                    style={{ background: categoryColor(cat?.id) }}
+                    aria-hidden
+                  >
+                    {categoryInitial(catName)}
                   </span>
-                  <span className="flex-1 truncate">
-                    {e.name?.trim() || cat.label}
-                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate">
+                      {e.name?.trim() || catName}
+                    </div>
+                    {by ? (
+                      <div className="text-[11px] text-muted truncate">
+                        {by}
+                      </div>
+                    ) : null}
+                  </div>
                   <span className="font-semibold text-neg">
                     −{formatRSD(Number(e.amount))}
                   </span>
@@ -293,5 +513,29 @@ function Stat({
         {value}
       </div>
     </div>
+  );
+}
+
+function ScopeTab({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+        active
+          ? "border-brand bg-brand text-white"
+          : "border-border bg-surface text-muted hover:text-foreground"
+      }`}
+    >
+      {label}
+    </button>
   );
 }

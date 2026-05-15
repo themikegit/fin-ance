@@ -1,5 +1,5 @@
 /* Finance PWA service worker — shell cache + network-first for app routes */
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL_CACHE = `shell-${VERSION}`;
 const RUNTIME_CACHE = `runtime-${VERSION}`;
 
