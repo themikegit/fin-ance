@@ -40,6 +40,24 @@ export async function createExpense(input: {
   return data.expense;
 }
 
+export async function updateExpense(
+  id: string,
+  patch: {
+    amount?: number;
+    category_id?: string | null;
+    name?: string | null;
+    created_at?: string;
+  },
+): Promise<Expense> {
+  const res = await fetch(`/api/expenses/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const data = await jsonOrThrow<{ expense: Expense }>(res);
+  return data.expense;
+}
+
 export async function deleteExpense(id: string): Promise<void> {
   const res = await fetch(`/api/expenses/${id}`, { method: "DELETE" });
   await jsonOrThrow<{ ok: true }>(res);

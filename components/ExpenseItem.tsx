@@ -9,23 +9,27 @@ type Props = {
   expense: Expense;
   category: Category | null;
   onDelete: (id: string) => void;
+  onEdit?: (expense: Expense) => void;
   pendingDelete?: boolean;
   byline?: string | null;
-  canDelete?: boolean;
+  canEdit?: boolean;
 };
 
 export default function ExpenseItem({
   expense,
   category,
   onDelete,
+  onEdit,
   pendingDelete,
   byline,
-  canDelete = true,
+  canEdit = true,
 }: Props) {
   const categoryName = category?.name || "Uncategorized";
   const title = expense.name?.trim() || categoryName;
-  return (
-    <li className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-b-0">
+  const interactive = canEdit && !!onEdit;
+
+  const content = (
+    <>
       <span
         className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold text-white"
         style={{ background: categoryColor(category?.id) }}
@@ -33,7 +37,7 @@ export default function ExpenseItem({
       >
         {categoryInitial(categoryName)}
       </span>
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 text-left">
         <div className="text-sm font-medium truncate">{title}</div>
         <div className="text-xs text-muted truncate">
           {formatDay(expense.created_at)}
@@ -43,7 +47,24 @@ export default function ExpenseItem({
       <div className="text-sm font-semibold text-neg">
         −{formatRSD(expense.amount)}
       </div>
-      {canDelete ? (
+    </>
+  );
+
+  return (
+    <li className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-b-0">
+      {interactive ? (
+        <button
+          type="button"
+          onClick={() => onEdit?.(expense)}
+          className="flex flex-1 items-center gap-3 text-left active:opacity-60"
+          aria-label={`Edit ${title}`}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className="flex flex-1 items-center gap-3">{content}</div>
+      )}
+      {canEdit ? (
         <button
           type="button"
           aria-label="Delete expense"

@@ -133,14 +133,39 @@ export default function AnalyticsClient() {
 
   const inSpace = scope.kind === "space";
 
+  const fixedCategory = useMemo(
+    () =>
+      categories.find((c) => c.name.toLowerCase() === "fixed") ?? null,
+    [categories],
+  );
+
+  const fixedAsExpenses = useMemo<Expense[]>(
+    () =>
+      fixed.map((f) => ({
+        id: `fixed:${f.id}`,
+        user_id: f.user_id,
+        amount: Number(f.amount),
+        category_id: fixedCategory?.id ?? null,
+        name: f.label,
+        created_at: f.created_at,
+      })),
+    [fixed, fixedCategory],
+  );
+
   const monthExpenses = useMemo(
-    () => (expenses ?? []).filter((e) => monthKey(e.created_at) === month),
-    [expenses, month],
+    () =>
+      [...(expenses ?? []), ...fixedAsExpenses].filter(
+        (e) => monthKey(e.created_at) === month,
+      ),
+    [expenses, fixedAsExpenses, month],
   );
   const prevMonthKey = shiftMonth(month, -1);
   const prevMonthExpenses = useMemo(
-    () => (expenses ?? []).filter((e) => monthKey(e.created_at) === prevMonthKey),
-    [expenses, prevMonthKey],
+    () =>
+      [...(expenses ?? []), ...fixedAsExpenses].filter(
+        (e) => monthKey(e.created_at) === prevMonthKey,
+      ),
+    [expenses, fixedAsExpenses, prevMonthKey],
   );
 
   const monthTotal = monthExpenses.reduce((s, e) => s + Number(e.amount), 0);
@@ -149,8 +174,10 @@ export default function AnalyticsClient() {
     (s, i) => s + Number(i.amount),
     0,
   );
-  const fixedTotal = fixed.reduce((s, i) => s + Number(i.amount), 0);
-  const balance = incomeTotal - monthTotal - fixedTotal;
+  const monthFixedTotal = monthExpenses
+    .filter((e) => e.id.startsWith("fixed:"))
+    .reduce((s, e) => s + Number(e.amount), 0);
+  const balance = incomeTotal - monthTotal;
 
   const byCategory = useMemo(() => {
     const totals = new Map<string, { label: string; value: number }>();
@@ -196,6 +223,7 @@ export default function AnalyticsClient() {
       amount: 0,
     }));
     for (const e of monthExpenses) {
+      if (e.id.startsWith("fixed:")) continue;
       const d = new Date(e.created_at).getDate();
       arr[d - 1].amount += Number(e.amount);
     }
@@ -268,9 +296,10 @@ export default function AnalyticsClient() {
             tone={balance >= 0 ? "pos" : "neg"}
           />
         </div>
-        {fixedTotal > 0 ? (
+        {monthFixedTotal > 0 ? (
           <div className="mt-2 text-[11px] text-muted">
-            Balance is after {formatRSD(fixedTotal)} fixed monthly expenses.
+            Spent includes {formatRSD(monthFixedTotal)} from fixed monthly
+            expenses.
           </div>
         ) : null}
       </section>
