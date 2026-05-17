@@ -75,6 +75,7 @@ export async function fetchIncomes(spaceId?: string | null): Promise<Income[]> {
 export async function createIncome(input: {
   label: string;
   amount: number;
+  recurring?: boolean;
 }): Promise<Income> {
   const res = await fetch("/api/incomes", {
     method: "POST",

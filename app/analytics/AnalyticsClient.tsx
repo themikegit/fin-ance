@@ -27,6 +27,7 @@ import {
   shiftMonth,
   formatRSD,
   daysInMonth,
+  sumIncomesForMonth,
 } from "@/lib/format";
 import { categoryColor, categoryInitial } from "@/lib/categories";
 import type {
@@ -170,10 +171,7 @@ export default function AnalyticsClient() {
 
   const monthTotal = monthExpenses.reduce((s, e) => s + Number(e.amount), 0);
   const prevTotal = prevMonthExpenses.reduce((s, e) => s + Number(e.amount), 0);
-  const incomeTotal = (incomes ?? []).reduce(
-    (s, i) => s + Number(i.amount),
-    0,
-  );
+  const incomeTotal = sumIncomesForMonth(incomes ?? [], month);
   const monthFixedTotal = monthExpenses
     .filter((e) => e.id.startsWith("fixed:"))
     .reduce((s, e) => s + Number(e.amount), 0);

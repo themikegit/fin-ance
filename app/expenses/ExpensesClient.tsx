@@ -20,6 +20,7 @@ import {
   monthLabel,
   currentMonthKey,
   formatRSD,
+  sumIncomesForMonth,
 } from "@/lib/format";
 import type {
   Category,
@@ -143,7 +144,7 @@ export default function ExpensesClient() {
   }, [members]);
 
   const monthlyIncomeTotal = useMemo(
-    () => (incomes ?? []).reduce((s, i) => s + Number(i.amount), 0),
+    () => sumIncomesForMonth(incomes ?? [], currentMonthKey()),
     [incomes],
   );
 

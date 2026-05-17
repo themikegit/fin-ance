@@ -21,7 +21,7 @@ import {
   deleteCategory,
 } from "@/lib/client";
 import { categoryColor, categoryInitial } from "@/lib/categories";
-import { formatRSD } from "@/lib/format";
+import { formatRSD, formatDay } from "@/lib/format";
 import type {
   Category,
   Income,
@@ -35,6 +35,7 @@ export default function SettingsClient() {
   const [incomes, setIncomes] = useState<Income[] | null>(null);
   const [label, setLabel] = useState<string>("");
   const [amount, setAmount] = useState<string>("");
+  const [recurring, setRecurring] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,10 +91,15 @@ export default function SettingsClient() {
     setSaving(true);
     setError(null);
     try {
-      const created = await createIncome({ label: label.trim(), amount: numeric });
+      const created = await createIncome({
+        label: label.trim(),
+        amount: numeric,
+        recurring,
+      });
       setIncomes((prev) => (prev ? [created, ...prev] : [created]));
       setLabel("");
       setAmount("");
+      setRecurring(true);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -229,14 +235,24 @@ export default function SettingsClient() {
     }
   };
 
-  const total = (incomes ?? []).reduce((s, i) => s + Number(i.amount), 0);
+  const total = (incomes ?? [])
+    .filter((i) => i.recurring)
+    .reduce((s, i) => s + Number(i.amount), 0);
   const fixedTotal = (fixed ?? []).reduce((s, i) => s + Number(i.amount), 0);
 
   return (
     <div className="mx-auto max-w-md px-4 pt-4 pb-6 space-y-6">
       <section className="rounded-2xl border border-border bg-surface overflow-hidden">
         <div className="px-4 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold">Monthly Income Sources</h2>
+          <h2 className="text-sm font-semibold">Income Sources</h2>
+          <p className="mt-1 text-xs text-muted">
+            <span className="font-medium">Recurring</span> sources (salary,
+            side gigs) apply to every month. Got existing savings, a bonus,
+            or starting mid-month? Add a{" "}
+            <span className="font-medium">one-time</span> entry called e.g.{" "}
+            <span className="font-medium">levelup</span> — it only counts in
+            the month you added it, so future months stay clean.
+          </p>
         </div>
 
         {incomes === null ? (
@@ -254,6 +270,11 @@ export default function SettingsClient() {
               >
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{i.label}</div>
+                  <div className="text-[11px] text-muted">
+                    {i.recurring
+                      ? "Recurring monthly"
+                      : `One-time · ${formatDay(i.created_at)}`}
+                  </div>
                 </div>
                 <div className="text-sm font-semibold text-pos tabular-nums">
                   {formatRSD(Number(i.amount))}
@@ -292,6 +313,21 @@ export default function SettingsClient() {
               className="col-span-2 rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums outline-none focus:border-brand"
             />
           </div>
+          <label className="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={recurring}
+              onChange={(e) => setRecurring(e.target.checked)}
+              disabled={saving}
+              className="h-4 w-4 accent-brand"
+            />
+            <span>
+              Recurring monthly{" "}
+              <span className="text-muted">
+                (uncheck for one-time like &ldquo;levelup&rdquo; or bonus)
+              </span>
+            </span>
+          </label>
           <button
             type="submit"
             disabled={!valid || saving}
@@ -304,7 +340,7 @@ export default function SettingsClient() {
         {incomes && incomes.length > 0 ? (
           <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-surface-2/40">
             <span className="text-xs uppercase tracking-wide text-muted">
-              Total
+              Monthly total
             </span>
             <span className="text-sm font-semibold text-pos tabular-nums">
               {formatRSD(total)}

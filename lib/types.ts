@@ -14,6 +14,7 @@ export type Income = {
   user_id: string;
   label: string;
   amount: number;
+  recurring: boolean;
   created_at: string;
 };
 

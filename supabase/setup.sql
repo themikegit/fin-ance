@@ -22,8 +22,12 @@ create table if not exists public.incomes (
   user_id text not null,
   label text not null,
   amount numeric(12, 2) not null check (amount > 0),
+  recurring boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+alter table public.incomes
+  add column if not exists recurring boolean not null default true;
 
 create index if not exists incomes_user_id_idx
   on public.incomes (user_id);

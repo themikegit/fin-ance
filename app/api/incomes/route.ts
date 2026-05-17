@@ -64,9 +64,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const { label, amount } = (body ?? {}) as {
+  const { label, amount, recurring } = (body ?? {}) as {
     label?: unknown;
     amount?: unknown;
+    recurring?: unknown;
   };
 
   if (typeof label !== "string" || !label.trim()) {
@@ -81,7 +82,12 @@ export async function POST(req: Request) {
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
     .from("incomes")
-    .insert({ user_id: userId, label: label.trim(), amount: numericAmount })
+    .insert({
+      user_id: userId,
+      label: label.trim(),
+      amount: numericAmount,
+      recurring: recurring === false ? false : true,
+    })
     .select()
     .single();
 
