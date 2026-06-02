@@ -17,36 +17,19 @@ create table if not exists public.expenses (
 create index if not exists expenses_user_id_created_at_idx
   on public.expenses (user_id, created_at desc);
 
+-- Income is a per-month transaction, not a recurring "source": each row is a
+-- single income event with a fixed kind (salary / other) and a month derived
+-- from created_at. The Monthly Fixed Expenses feature has been removed.
 create table if not exists public.incomes (
   id uuid primary key default gen_random_uuid(),
   user_id text not null,
-  label text not null,
   amount numeric(12, 2) not null check (amount > 0),
-  recurring boolean not null default true,
+  kind text not null check (kind in ('salary','other')),
   created_at timestamptz not null default now()
 );
 
-alter table public.incomes
-  add column if not exists recurring boolean not null default true;
-
-create index if not exists incomes_user_id_idx
-  on public.incomes (user_id);
-
-create table if not exists public.monthly_expenses (
-  id uuid primary key default gen_random_uuid(),
-  user_id text not null,
-  label text not null,
-  amount numeric(12, 2) not null check (amount > 0),
-  months integer check (months is null or months > 0),
-  created_at timestamptz not null default now()
-);
-
-alter table public.monthly_expenses
-  add column if not exists months integer
-    check (months is null or months > 0);
-
-create index if not exists monthly_expenses_user_id_idx
-  on public.monthly_expenses (user_id);
+create index if not exists incomes_user_id_created_at_idx
+  on public.incomes (user_id, created_at desc);
 
 create table if not exists public.spaces (
   id uuid primary key default gen_random_uuid(),
@@ -89,11 +72,10 @@ alter table public.expenses drop column if exists category_emoji;
 -- from server-side route handlers only. RLS is therefore not relied on, but
 -- enabling it with a deny-by-default policy is good defense-in-depth: if the
 -- anon key is ever exposed to a client by mistake, no rows leak.
-alter table public.expenses         enable row level security;
-alter table public.incomes          enable row level security;
-alter table public.monthly_expenses enable row level security;
-alter table public.spaces           enable row level security;
-alter table public.space_members    enable row level security;
-alter table public.categories       enable row level security;
+alter table public.expenses      enable row level security;
+alter table public.incomes       enable row level security;
+alter table public.spaces        enable row level security;
+alter table public.space_members enable row level security;
+alter table public.categories    enable row level security;
 
 -- No policies = deny all to anon / authenticated. service_role bypasses RLS.

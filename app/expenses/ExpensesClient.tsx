@@ -1,56 +1,59 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { Trash2, X } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import ExpenseItem from "@/components/ExpenseItem";
+import MonthSwitcher from "@/components/MonthSwitcher";
 import {
   fetchCategories,
   fetchExpenses,
   fetchIncomes,
-  fetchMonthlyExpenses,
   fetchSpaces,
   fetchSpaceMembers,
   deleteExpense,
   updateExpense,
+  deleteIncome,
+  updateIncome,
 } from "@/lib/client";
 import { categoryColor, categoryInitial } from "@/lib/categories";
 import {
   monthKey,
-  monthLabel,
   currentMonthKey,
   formatRSD,
-  sumIncomesForMonth,
+  formatDay,
 } from "@/lib/format";
 import type {
   Category,
   Expense,
   Income,
-  MonthlyExpense,
+  IncomeKind,
   SpaceSummary,
   SpaceMemberView,
 } from "@/lib/types";
 
-type MonthGroup = {
-  key: string;
-  expenses: Expense[];
-  total: number;
-};
-
 type Scope = { kind: "personal" } | { kind: "space"; id: string };
+
+const KIND_LABEL: Record<IncomeKind, string> = {
+  salary: "Salary",
+  other: "Other",
+};
 
 export default function ExpensesClient() {
   const { user } = useUser();
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [incomes, setIncomes] = useState<Income[] | null>(null);
-  const [fixed, setFixed] = useState<MonthlyExpense[]>([]);
   const [spaces, setSpaces] = useState<SpaceSummary[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [members, setMembers] = useState<SpaceMemberView[]>([]);
   const [scope, setScope] = useState<Scope>({ kind: "personal" });
-  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [month, setMonth] = useState<string>(currentMonthKey());
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [pendingIncomeDelete, setPendingIncomeDelete] = useState<string | null>(
+    null,
+  );
   const [editing, setEditing] = useState<Expense | null>(null);
+  const [editingIncome, setEditingIncome] = useState<Income | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingScope, setLoadingScope] = useState<boolean>(false);
 
@@ -70,6 +73,17 @@ export default function ExpensesClient() {
     setEditing(null);
   };
 
+  const onSaveIncomeEdit = async (
+    id: string,
+    patch: { amount?: number; kind?: IncomeKind; created_at?: string },
+  ) => {
+    const updated = await updateIncome(id, patch);
+    setIncomes((arr) =>
+      arr ? arr.map((i) => (i.id === id ? updated : i)) : arr,
+    );
+    setEditingIncome(null);
+  };
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -78,7 +92,6 @@ export default function ExpensesClient() {
         if (cancelled) return;
         setSpaces(sps);
         setCategories(cats);
-        setOpen({ [currentMonthKey()]: true });
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
       }
@@ -101,27 +114,23 @@ export default function ExpensesClient() {
       setError(null);
       try {
         if (scope.kind === "personal") {
-          const [exps, incs, fx] = await Promise.all([
+          const [exps, incs] = await Promise.all([
             fetchExpenses(),
             fetchIncomes(),
-            fetchMonthlyExpenses(),
           ]);
           if (cancelled) return;
           setExpenses(exps);
           setIncomes(incs);
-          setFixed(fx);
           setMembers([]);
         } else {
-          const [exps, incs, fx, m] = await Promise.all([
+          const [exps, incs, m] = await Promise.all([
             fetchExpenses(scope.id),
             fetchIncomes(scope.id),
-            fetchMonthlyExpenses(scope.id),
             fetchSpaceMembers(scope.id),
           ]);
           if (cancelled) return;
           setExpenses(exps);
           setIncomes(incs);
-          setFixed(fx);
           setMembers(m);
         }
       } catch (e) {
@@ -143,45 +152,19 @@ export default function ExpensesClient() {
     return m;
   }, [members]);
 
-  const monthlyIncomeTotal = useMemo(
-    () => sumIncomesForMonth(incomes ?? [], currentMonthKey()),
-    [incomes],
+  const monthExpenses = useMemo(
+    () =>
+      (expenses ?? []).filter((e) => monthKey(e.created_at) === month),
+    [expenses, month],
+  );
+  const monthIncomes = useMemo(
+    () => (incomes ?? []).filter((i) => monthKey(i.created_at) === month),
+    [incomes, month],
   );
 
-  const fixedByMonth = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const f of fixed) {
-      const k = monthKey(f.created_at);
-      m.set(k, (m.get(k) ?? 0) + Number(f.amount));
-    }
-    return m;
-  }, [fixed]);
-
-  type MonthGroupExt = MonthGroup & { fixedTotal: number };
-  const groups: MonthGroupExt[] = useMemo(() => {
-    if (!expenses) return [];
-    const map = new Map<string, MonthGroupExt>();
-    for (const e of expenses) {
-      const k = monthKey(e.created_at);
-      let g = map.get(k);
-      if (!g) {
-        g = { key: k, expenses: [], total: 0, fixedTotal: 0 };
-        map.set(k, g);
-      }
-      g.expenses.push(e);
-      g.total += Number(e.amount);
-    }
-    for (const [k, fixedSum] of fixedByMonth.entries()) {
-      let g = map.get(k);
-      if (!g) {
-        g = { key: k, expenses: [], total: 0, fixedTotal: fixedSum };
-        map.set(k, g);
-      } else {
-        g.fixedTotal = fixedSum;
-      }
-    }
-    return [...map.values()].sort((a, b) => (a.key < b.key ? 1 : -1));
-  }, [expenses, fixedByMonth]);
+  const spent = monthExpenses.reduce((s, e) => s + Number(e.amount), 0);
+  const incomeTotal = monthIncomes.reduce((s, i) => s + Number(i.amount), 0);
+  const left = incomeTotal - spent;
 
   const onDelete = async (id: string) => {
     if (pendingDelete) return;
@@ -195,6 +178,21 @@ export default function ExpensesClient() {
       setExpenses(prev);
     } finally {
       setPendingDelete(null);
+    }
+  };
+
+  const onDeleteIncome = async (id: string) => {
+    if (pendingIncomeDelete) return;
+    setPendingIncomeDelete(id);
+    const prev = incomes;
+    setIncomes((arr) => (arr ? arr.filter((i) => i.id !== id) : arr));
+    try {
+      await deleteIncome(id);
+    } catch (e) {
+      setError((e as Error).message);
+      setIncomes(prev);
+    } finally {
+      setPendingIncomeDelete(null);
     }
   };
 
@@ -235,126 +233,112 @@ export default function ExpensesClient() {
         </div>
       ) : null}
 
-      {loadingScope && groups.length === 0 ? (
+      <MonthSwitcher value={month} onChange={setMonth} />
+
+      <section className="rounded-2xl border border-border bg-surface p-4">
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-muted">
+              Income
+            </div>
+            <div className="mt-1 text-sm font-semibold tabular-nums text-pos">
+              {formatRSD(incomeTotal)}
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-muted">
+              Spent
+            </div>
+            <div className="mt-1 text-sm font-semibold tabular-nums text-neg">
+              {formatRSD(spent)}
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-muted">
+              Left
+            </div>
+            <div
+              className={`mt-1 text-sm font-semibold tabular-nums ${
+                left >= 0 ? "text-pos" : "text-neg"
+              }`}
+            >
+              {formatRSD(left)}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {loadingScope && monthExpenses.length === 0 && monthIncomes.length === 0 ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : null}
 
-      {groups.length === 0 && !loadingScope ? (
-        <div className="pt-8 text-center text-sm text-muted">
-          {inSpace ? (
-            "No expenses in this space yet."
-          ) : (
-            <>
-              No expenses yet. Tap <span className="font-medium">Add</span> to
-              log one.
-            </>
-          )}
+      <section className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-3 border-b border-border text-sm font-semibold">
+          Expenses
         </div>
-      ) : null}
-
-      {groups.map((g) => {
-        const isOpen = !!open[g.key];
-        const showIncome =
-          monthlyIncomeTotal > 0 && g.key === currentMonthKey();
-        const groupSpent = g.total + g.fixedTotal;
-        return (
-          <section
-            key={g.key}
-            className="rounded-2xl border border-border bg-surface overflow-hidden"
-          >
-            <button
-              type="button"
-              onClick={() => setOpen((o) => ({ ...o, [g.key]: !o[g.key] }))}
-              className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-surface-2"
-              aria-expanded={isOpen}
-            >
-              <div>
-                <div className="text-sm font-semibold">
-                  {monthLabel(g.key)}
-                </div>
-                <div className="text-xs text-muted">
-                  {g.expenses.length} item{g.expenses.length === 1 ? "" : "s"}
-                  {g.fixedTotal > 0 ? " + fixed" : ""}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="text-sm font-semibold text-neg">
-                  −{formatRSD(groupSpent)}
-                </div>
-                <ChevronDown
-                  size={18}
-                  className={`text-muted transition-transform ${
-                    isOpen ? "rotate-180" : ""
-                  }`}
+        {monthExpenses.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-muted">
+            {inSpace
+              ? "No expenses in this space this month."
+              : "No expenses this month."}
+          </p>
+        ) : (
+          <ul>
+            {monthExpenses.map((e) => {
+              const byline = inSpace
+                ? memberNameByUserId.get(e.user_id) ?? "Member"
+                : null;
+              const mine = !inSpace || e.user_id === currentUserId;
+              const cat = e.category_id
+                ? categoryById.get(e.category_id) ?? null
+                : null;
+              return (
+                <ExpenseItem
+                  key={e.id}
+                  expense={e}
+                  category={cat}
+                  onDelete={onDelete}
+                  onEdit={mine ? setEditing : undefined}
+                  pendingDelete={pendingDelete === e.id}
+                  byline={byline}
+                  canEdit={mine}
                 />
-              </div>
-            </button>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
-            {isOpen ? (
-              <>
-                {showIncome ? (
-                  <div className="px-4 py-3 border-t border-border bg-surface-2/40 text-xs space-y-2">
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <div className="text-muted">Income</div>
-                        <div className="font-semibold text-pos">
-                          {formatRSD(monthlyIncomeTotal)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-muted">Spent</div>
-                        <div className="font-semibold text-neg">
-                          {formatRSD(groupSpent)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-muted">Left</div>
-                        <div
-                          className={`font-semibold ${
-                            monthlyIncomeTotal - groupSpent >= 0
-                              ? "text-pos"
-                              : "text-neg"
-                          }`}
-                        >
-                          {formatRSD(monthlyIncomeTotal - groupSpent)}
-                        </div>
-                      </div>
-                    </div>
-                    {g.fixedTotal > 0 ? (
-                      <div className="text-muted">
-                        incl. {formatRSD(g.fixedTotal)} fixed
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-                <ul className="border-t border-border">
-                  {g.expenses.map((e) => {
-                    const byline = inSpace
-                      ? memberNameByUserId.get(e.user_id) ?? "Member"
-                      : null;
-                    const mine = !inSpace || e.user_id === currentUserId;
-                    const cat = e.category_id
-                      ? categoryById.get(e.category_id) ?? null
-                      : null;
-                    return (
-                      <ExpenseItem
-                        key={e.id}
-                        expense={e}
-                        category={cat}
-                        onDelete={onDelete}
-                        onEdit={mine ? setEditing : undefined}
-                        pendingDelete={pendingDelete === e.id}
-                        byline={byline}
-                        canEdit={mine}
-                      />
-                    );
-                  })}
-                </ul>
-              </>
-            ) : null}
-          </section>
-        );
-      })}
+      <section className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-3 border-b border-border text-sm font-semibold">
+          Income
+        </div>
+        {monthIncomes.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-muted">
+            No income this month.
+          </p>
+        ) : (
+          <ul>
+            {monthIncomes.map((i) => {
+              const mine = !inSpace || i.user_id === currentUserId;
+              const byline = inSpace
+                ? memberNameByUserId.get(i.user_id) ?? "Member"
+                : null;
+              return (
+                <IncomeRow
+                  key={i.id}
+                  income={i}
+                  byline={byline}
+                  canEdit={mine}
+                  pendingDelete={pendingIncomeDelete === i.id}
+                  onEdit={mine ? setEditingIncome : undefined}
+                  onDelete={onDeleteIncome}
+                />
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       {editing ? (
         <EditExpenseSheet
@@ -364,7 +348,205 @@ export default function ExpensesClient() {
           onSave={onSaveEdit}
         />
       ) : null}
+
+      {editingIncome ? (
+        <EditIncomeSheet
+          income={editingIncome}
+          onClose={() => setEditingIncome(null)}
+          onSave={onSaveIncomeEdit}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function IncomeRow({
+  income,
+  byline,
+  canEdit,
+  pendingDelete,
+  onEdit,
+  onDelete,
+}: {
+  income: Income;
+  byline: string | null;
+  canEdit: boolean;
+  pendingDelete: boolean;
+  onEdit?: (income: Income) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <li className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-b-0">
+      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-pos/15 text-xs font-semibold text-pos shrink-0">
+        {KIND_LABEL[income.kind].slice(0, 1)}
+      </span>
+      <button
+        type="button"
+        onClick={canEdit ? () => onEdit?.(income) : undefined}
+        disabled={!canEdit}
+        className="flex-1 min-w-0 text-left disabled:cursor-default"
+      >
+        <div className="text-sm font-medium truncate">
+          {KIND_LABEL[income.kind]}
+        </div>
+        <div className="text-[11px] text-muted truncate">
+          {byline ? `${byline} · ` : ""}
+          {formatDay(income.created_at)}
+        </div>
+      </button>
+      <div className="text-sm font-semibold text-pos tabular-nums shrink-0">
+        {formatRSD(Number(income.amount))}
+      </div>
+      {canEdit ? (
+        <button
+          type="button"
+          aria-label="Delete income"
+          onClick={() => onDelete(income.id)}
+          disabled={pendingDelete}
+          className="ml-1 p-2 -mr-2 text-muted hover:text-neg disabled:opacity-40"
+        >
+          <Trash2 size={18} />
+        </button>
+      ) : null}
+    </li>
+  );
+}
+
+function EditIncomeSheet({
+  income,
+  onClose,
+  onSave,
+}: {
+  income: Income;
+  onClose: () => void;
+  onSave: (
+    id: string,
+    patch: { amount?: number; kind?: IncomeKind; created_at?: string },
+  ) => Promise<void>;
+}) {
+  const [amount, setAmount] = useState<string>(String(income.amount));
+  const [kind, setKind] = useState<IncomeKind>(income.kind);
+  const [date, setDate] = useState<string>(income.created_at.slice(0, 10));
+  const [busy, setBusy] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const numeric = Number.parseFloat(amount);
+  const valid = Number.isFinite(numeric) && numeric > 0 && !!date;
+
+  const submit = async () => {
+    if (!valid || busy) return;
+    const patch: { amount?: number; kind?: IncomeKind; created_at?: string } =
+      {};
+    if (numeric !== Number(income.amount)) patch.amount = numeric;
+    if (kind !== income.kind) patch.kind = kind;
+    if (date !== income.created_at.slice(0, 10)) {
+      patch.created_at = new Date(`${date}T12:00:00.000Z`).toISOString();
+    }
+    if (Object.keys(patch).length === 0) {
+      onClose();
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave(income.id, patch);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+      />
+      <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md rounded-t-3xl border-t border-border bg-surface p-5 pb-8 shadow-2xl animate-slide-up safe-pb">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="text-sm font-semibold">Edit income</div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="rounded-full p-2 text-muted hover:bg-surface-2"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <label className="block text-xs font-medium uppercase tracking-wide text-muted">
+            Amount (RSD)
+          </label>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))}
+            disabled={busy}
+            className="w-full rounded-2xl border border-border bg-background px-4 py-3 text-lg tabular-nums outline-none focus:border-brand"
+          />
+
+          <div className="text-xs font-medium uppercase tracking-wide text-muted">
+            Type
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {(["salary", "other"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setKind(k)}
+                disabled={busy}
+                className={`rounded-xl border px-2 py-2.5 text-sm font-medium ${
+                  kind === k
+                    ? "border-pos bg-surface-2"
+                    : "border-border bg-surface"
+                }`}
+              >
+                {KIND_LABEL[k]}
+              </button>
+            ))}
+          </div>
+
+          <label className="block text-xs font-medium uppercase tracking-wide text-muted">
+            Date
+          </label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            disabled={busy}
+            className="w-full rounded-2xl border border-border bg-background px-4 py-3 text-base outline-none focus:border-brand"
+          />
+        </div>
+
+        {error ? (
+          <p className="mt-3 text-center text-sm text-neg">{error}</p>
+        ) : null}
+
+        <div className="mt-5 flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="flex-1 rounded-2xl border border-border bg-surface-2 py-3 text-sm font-medium text-muted hover:text-foreground disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!valid || busy}
+            className="flex-1 rounded-2xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 

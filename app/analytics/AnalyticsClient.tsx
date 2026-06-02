@@ -17,7 +17,6 @@ import {
   fetchCategories,
   fetchExpenses,
   fetchIncomes,
-  fetchMonthlyExpenses,
   fetchSpaces,
   fetchSpaceMembers,
 } from "@/lib/client";
@@ -34,7 +33,6 @@ import type {
   Category,
   Expense,
   Income,
-  MonthlyExpense,
   SpaceSummary,
   SpaceMemberView,
 } from "@/lib/types";
@@ -63,7 +61,6 @@ type Scope = { kind: "personal" } | { kind: "space"; id: string };
 export default function AnalyticsClient() {
   const [expenses, setExpenses] = useState<Expense[] | null>(null);
   const [incomes, setIncomes] = useState<Income[] | null>(null);
-  const [fixed, setFixed] = useState<MonthlyExpense[]>([]);
   const [spaces, setSpaces] = useState<SpaceSummary[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [members, setMembers] = useState<SpaceMemberView[]>([]);
@@ -100,27 +97,23 @@ export default function AnalyticsClient() {
       setError(null);
       try {
         if (scope.kind === "personal") {
-          const [exps, incs, fx] = await Promise.all([
+          const [exps, incs] = await Promise.all([
             fetchExpenses(),
             fetchIncomes(),
-            fetchMonthlyExpenses(),
           ]);
           if (cancelled) return;
           setExpenses(exps);
           setIncomes(incs);
-          setFixed(fx);
           setMembers([]);
         } else {
-          const [exps, incs, fx, m] = await Promise.all([
+          const [exps, incs, m] = await Promise.all([
             fetchExpenses(scope.id),
             fetchIncomes(scope.id),
-            fetchMonthlyExpenses(scope.id),
             fetchSpaceMembers(scope.id),
           ]);
           if (cancelled) return;
           setExpenses(exps);
           setIncomes(incs);
-          setFixed(fx);
           setMembers(m);
         }
       } catch (e) {
@@ -134,47 +127,20 @@ export default function AnalyticsClient() {
 
   const inSpace = scope.kind === "space";
 
-  const fixedCategory = useMemo(
-    () =>
-      categories.find((c) => c.name.toLowerCase() === "fixed") ?? null,
-    [categories],
-  );
-
-  const fixedAsExpenses = useMemo<Expense[]>(
-    () =>
-      fixed.map((f) => ({
-        id: `fixed:${f.id}`,
-        user_id: f.user_id,
-        amount: Number(f.amount),
-        category_id: fixedCategory?.id ?? null,
-        name: f.label,
-        created_at: f.created_at,
-      })),
-    [fixed, fixedCategory],
-  );
-
   const monthExpenses = useMemo(
-    () =>
-      [...(expenses ?? []), ...fixedAsExpenses].filter(
-        (e) => monthKey(e.created_at) === month,
-      ),
-    [expenses, fixedAsExpenses, month],
+    () => (expenses ?? []).filter((e) => monthKey(e.created_at) === month),
+    [expenses, month],
   );
   const prevMonthKey = shiftMonth(month, -1);
   const prevMonthExpenses = useMemo(
     () =>
-      [...(expenses ?? []), ...fixedAsExpenses].filter(
-        (e) => monthKey(e.created_at) === prevMonthKey,
-      ),
-    [expenses, fixedAsExpenses, prevMonthKey],
+      (expenses ?? []).filter((e) => monthKey(e.created_at) === prevMonthKey),
+    [expenses, prevMonthKey],
   );
 
   const monthTotal = monthExpenses.reduce((s, e) => s + Number(e.amount), 0);
   const prevTotal = prevMonthExpenses.reduce((s, e) => s + Number(e.amount), 0);
   const incomeTotal = sumIncomesForMonth(incomes ?? [], month);
-  const monthFixedTotal = monthExpenses
-    .filter((e) => e.id.startsWith("fixed:"))
-    .reduce((s, e) => s + Number(e.amount), 0);
   const balance = incomeTotal - monthTotal;
 
   const byCategory = useMemo(() => {
@@ -221,7 +187,6 @@ export default function AnalyticsClient() {
       amount: 0,
     }));
     for (const e of monthExpenses) {
-      if (e.id.startsWith("fixed:")) continue;
       const d = new Date(e.created_at).getDate();
       arr[d - 1].amount += Number(e.amount);
     }
@@ -294,12 +259,6 @@ export default function AnalyticsClient() {
             tone={balance >= 0 ? "pos" : "neg"}
           />
         </div>
-        {monthFixedTotal > 0 ? (
-          <div className="mt-2 text-[11px] text-muted">
-            Spent includes {formatRSD(monthFixedTotal)} from fixed monthly
-            expenses.
-          </div>
-        ) : null}
       </section>
 
       {momPct !== null ? (

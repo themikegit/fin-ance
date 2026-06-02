@@ -64,30 +64,34 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const { label, amount, recurring } = (body ?? {}) as {
-    label?: unknown;
+  const { amount, kind, created_at } = (body ?? {}) as {
     amount?: unknown;
-    recurring?: unknown;
+    kind?: unknown;
+    created_at?: unknown;
   };
 
-  if (typeof label !== "string" || !label.trim()) {
-    return NextResponse.json({ error: "invalid_label" }, { status: 400 });
-  }
   const numericAmount =
     typeof amount === "number" ? amount : Number.parseFloat(String(amount));
   if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
     return NextResponse.json({ error: "invalid_amount" }, { status: 400 });
   }
+  if (kind !== "salary" && kind !== "other") {
+    return NextResponse.json({ error: "invalid_kind" }, { status: 400 });
+  }
+
+  const insert: Record<string, unknown> = {
+    user_id: userId,
+    amount: numericAmount,
+    kind,
+  };
+  if (typeof created_at === "string" && created_at) {
+    insert.created_at = created_at;
+  }
 
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
     .from("incomes")
-    .insert({
-      user_id: userId,
-      label: label.trim(),
-      amount: numericAmount,
-      recurring: recurring === false ? false : true,
-    })
+    .insert(insert)
     .select()
     .single();
 

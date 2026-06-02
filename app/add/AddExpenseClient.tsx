@@ -3,17 +3,22 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import CategoryGrid from "@/components/CategoryGrid";
+import MonthSwitcher from "@/components/MonthSwitcher";
 import Toast from "@/components/Toast";
-import { createExpense, fetchCategories } from "@/lib/client";
+import { createExpense, createIncome, fetchCategories } from "@/lib/client";
 import type { Category } from "@/lib/categories";
-import { formatRSD } from "@/lib/format";
+import type { IncomeKind } from "@/lib/types";
+import { currentMonthKey, formatRSD, monthToISO } from "@/lib/format";
 
 const QUICK = [500, 1000, 2000, 5000] as const;
+
+type Sheet = "expense" | "income" | null;
 
 export default function AddExpenseClient() {
   const [amount, setAmount] = useState<string>("");
   const [name, setName] = useState<string>("");
-  const [picking, setPicking] = useState<boolean>(false);
+  const [month, setMonth] = useState<string>(currentMonthKey());
+  const [sheet, setSheet] = useState<Sheet>(null);
   const [saving, setSaving] = useState<boolean>(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +47,10 @@ export default function AddExpenseClient() {
   const numeric = Number.parseFloat(amount);
   const valid = Number.isFinite(numeric) && numeric > 0;
 
+  // Current month → let the DB stamp now() (keeps day-level data for charts).
+  // Other months → noon on the 1st so the month reads back correctly.
+  const createdAt = month === currentMonthKey() ? undefined : monthToISO(month);
+
   const handleAmountChange = (v: string) => {
     const cleaned = v.replace(/[^\d.]/g, "");
     const parts = cleaned.split(".");
@@ -50,16 +59,16 @@ export default function AddExpenseClient() {
     setAmount(normalized);
   };
 
-  const openPicker = () => {
+  const openSheet = (which: Exclude<Sheet, null>) => {
     if (!valid || saving) return;
     setError(null);
-    setPicking(true);
+    setSheet(which);
   };
 
   const reset = () => {
     setAmount("");
     setName("");
-    setPicking(false);
+    setSheet(null);
     setSaving(false);
     inputRef.current?.focus();
   };
@@ -73,8 +82,23 @@ export default function AddExpenseClient() {
         amount: numeric,
         category_id: category.id,
         name: name.trim() || null,
+        created_at: createdAt,
       });
       setToast(`Saved ${formatRSD(numeric)}`);
+      reset();
+    } catch (e) {
+      setError((e as Error).message || "Failed to save");
+      setSaving(false);
+    }
+  };
+
+  const saveIncome = async (kind: IncomeKind) => {
+    if (!valid || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await createIncome({ amount: numeric, kind, created_at: createdAt });
+      setToast(`Income ${formatRSD(numeric)}`);
       reset();
     } catch (e) {
       setError((e as Error).message || "Failed to save");
@@ -106,7 +130,7 @@ export default function AddExpenseClient() {
           value={amount}
           onChange={(e) => handleAmountChange(e.target.value)}
           className="w-full bg-transparent text-center text-5xl font-bold tabular-nums outline-none placeholder:text-muted/40"
-          aria-label="Expense amount"
+          aria-label="Amount"
         />
       </div>
 
@@ -123,25 +147,39 @@ export default function AddExpenseClient() {
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={openPicker}
-        disabled={!valid || saving}
-        className="mt-6 w-full rounded-2xl bg-brand py-4 text-base font-semibold text-white shadow-sm transition-all active:scale-[0.99] disabled:opacity-40"
-      >
-        Add
-      </button>
+      <div className="mt-4">
+        <MonthSwitcher value={month} onChange={setMonth} />
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <button
+          type="button"
+          onClick={() => openSheet("expense")}
+          disabled={!valid || saving}
+          className="col-span-2 rounded-2xl bg-brand py-4 text-base font-semibold text-white shadow-sm transition-all active:scale-[0.99] disabled:opacity-40"
+        >
+          Add
+        </button>
+        <button
+          type="button"
+          onClick={() => openSheet("income")}
+          disabled={!valid || saving}
+          className="col-span-1 rounded-2xl border border-pos/40 bg-surface py-4 text-base font-semibold text-pos shadow-sm transition-all active:scale-[0.99] hover:bg-surface-2 disabled:opacity-40"
+        >
+          Income
+        </button>
+      </div>
 
       {error ? (
         <p className="mt-3 text-center text-sm text-neg">{error}</p>
       ) : null}
 
-      {picking ? (
+      {sheet === "expense" ? (
         <>
           <button
             type="button"
             aria-label="Close"
-            onClick={() => setPicking(false)}
+            onClick={() => setSheet(null)}
             className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
           />
           <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md rounded-t-3xl border-t border-border bg-surface p-5 pb-8 shadow-2xl animate-slide-up safe-pb">
@@ -155,7 +193,7 @@ export default function AddExpenseClient() {
               <button
                 type="button"
                 aria-label="Close"
-                onClick={() => setPicking(false)}
+                onClick={() => setSheet(null)}
                 className="rounded-full p-2 text-muted hover:bg-surface-2"
               >
                 <X size={20} />
@@ -187,6 +225,54 @@ export default function AddExpenseClient() {
                 Skip (save as {otherCategory.name})
               </button>
             ) : null}
+          </div>
+        </>
+      ) : null}
+
+      {sheet === "income" ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setSheet(null)}
+            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+          />
+          <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md rounded-t-3xl border-t border-border bg-surface p-5 pb-8 shadow-2xl animate-slide-up safe-pb">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <div className="text-xs text-muted">Income</div>
+                <div className="text-2xl font-bold tabular-nums text-pos">
+                  {formatRSD(numeric)}
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setSheet(null)}
+                className="rounded-full p-2 text-muted hover:bg-surface-2"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => saveIncome("salary")}
+                disabled={saving}
+                className="rounded-2xl border border-border bg-surface-2 py-5 text-base font-semibold hover:border-pos disabled:opacity-50"
+              >
+                Salary
+              </button>
+              <button
+                type="button"
+                onClick={() => saveIncome("other")}
+                disabled={saving}
+                className="rounded-2xl border border-border bg-surface-2 py-5 text-base font-semibold hover:border-pos disabled:opacity-50"
+              >
+                Other
+              </button>
+            </div>
           </div>
         </>
       ) : null}

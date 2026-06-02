@@ -9,21 +9,13 @@ export type Expense = {
   created_at: string;
 };
 
+export type IncomeKind = "salary" | "other";
+
 export type Income = {
   id: string;
   user_id: string;
-  label: string;
   amount: number;
-  recurring: boolean;
-  created_at: string;
-};
-
-export type MonthlyExpense = {
-  id: string;
-  user_id: string;
-  label: string;
-  amount: number;
-  months: number | null;
+  kind: IncomeKind;
   created_at: string;
 };
 

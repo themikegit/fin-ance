@@ -4,7 +4,7 @@ import type {
   Category,
   Expense,
   Income,
-  MonthlyExpense,
+  IncomeKind,
   SpaceSummary,
   SpaceMemberView,
 } from "./types";
@@ -30,6 +30,7 @@ export async function createExpense(input: {
   amount: number;
   category_id: string;
   name?: string | null;
+  created_at?: string;
 }): Promise<Expense> {
   const res = await fetch("/api/expenses", {
     method: "POST",
@@ -73,9 +74,9 @@ export async function fetchIncomes(spaceId?: string | null): Promise<Income[]> {
 }
 
 export async function createIncome(input: {
-  label: string;
   amount: number;
-  recurring?: boolean;
+  kind: IncomeKind;
+  created_at?: string;
 }): Promise<Income> {
   const res = await fetch("/api/incomes", {
     method: "POST",
@@ -86,38 +87,21 @@ export async function createIncome(input: {
   return data.income;
 }
 
+export async function updateIncome(
+  id: string,
+  patch: { amount?: number; kind?: IncomeKind; created_at?: string },
+): Promise<Income> {
+  const res = await fetch(`/api/incomes/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const data = await jsonOrThrow<{ income: Income }>(res);
+  return data.income;
+}
+
 export async function deleteIncome(id: string): Promise<void> {
   const res = await fetch(`/api/incomes/${id}`, { method: "DELETE" });
-  await jsonOrThrow<{ ok: true }>(res);
-}
-
-export async function fetchMonthlyExpenses(
-  spaceId?: string | null,
-): Promise<MonthlyExpense[]> {
-  const url = spaceId
-    ? `/api/monthly-expenses?space_id=${encodeURIComponent(spaceId)}`
-    : "/api/monthly-expenses";
-  const res = await fetch(url, { cache: "no-store" });
-  const data = await jsonOrThrow<{ monthly_expenses: MonthlyExpense[] }>(res);
-  return data.monthly_expenses;
-}
-
-export async function createMonthlyExpense(input: {
-  label: string;
-  amount: number;
-  months?: number | null;
-}): Promise<MonthlyExpense> {
-  const res = await fetch("/api/monthly-expenses", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const data = await jsonOrThrow<{ monthly_expense: MonthlyExpense }>(res);
-  return data.monthly_expense;
-}
-
-export async function deleteMonthlyExpense(id: string): Promise<void> {
-  const res = await fetch(`/api/monthly-expenses/${id}`, { method: "DELETE" });
   await jsonOrThrow<{ ok: true }>(res);
 }
 
