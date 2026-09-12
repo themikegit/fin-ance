@@ -61,3 +61,9 @@ export function sumIncomesForMonth(
   }
   return total;
 }
+
+// Days remaining in the current month, counting today.
+export function daysLeftInMonth(now: Date = new Date()): number {
+  const total = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return total - now.getDate() + 1;
+}

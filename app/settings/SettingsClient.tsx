@@ -13,12 +13,16 @@ import {
   createCategory,
   updateCategory,
   deleteCategory,
+  fetchSettings,
+  updateSettings,
 } from "@/lib/client";
 import { categoryColor, categoryInitial } from "@/lib/categories";
+import { formatRSD } from "@/lib/format";
 import type {
   Category,
   SpaceSummary,
   SpaceMemberView,
+  UserSettings,
 } from "@/lib/types";
 
 export default function SettingsClient() {
@@ -34,17 +38,26 @@ export default function SettingsClient() {
   const [newCatName, setNewCatName] = useState<string>("");
   const [creatingCat, setCreatingCat] = useState<boolean>(false);
 
+  const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [savingsInput, setSavingsInput] = useState<string>("");
+  const [savingSettings, setSavingSettings] = useState<boolean>(false);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [sp, cats] = await Promise.all([
+        const [sp, cats, st] = await Promise.all([
           fetchSpaces(),
           fetchCategories(),
+          fetchSettings(),
         ]);
         if (cancelled) return;
         setSpaces(sp);
         setCategories(cats);
+        setSettings(st);
+        setSavingsInput(
+          st.monthly_savings != null ? String(st.monthly_savings) : "",
+        );
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
       }
@@ -114,8 +127,96 @@ export default function SettingsClient() {
     }
   };
 
+  const savingsNumeric = Number.parseFloat(savingsInput);
+  const savingsValid =
+    savingsInput.trim() === "" ||
+    (Number.isFinite(savingsNumeric) && savingsNumeric >= 0);
+  const savingsDirty =
+    settings !== null &&
+    (savingsInput.trim() === ""
+      ? settings.monthly_savings !== null
+      : savingsNumeric !== settings.monthly_savings);
+
+  const onSaveSavings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!savingsValid || !savingsDirty || savingSettings) return;
+    setSavingSettings(true);
+    setError(null);
+    try {
+      const next = await updateSettings({
+        monthly_savings: savingsInput.trim() === "" ? null : savingsNumeric,
+      });
+      setSettings(next);
+      setSavingsInput(
+        next.monthly_savings != null ? String(next.monthly_savings) : "",
+      );
+      setToast(
+        next.monthly_savings != null
+          ? `Savings goal set to ${formatRSD(next.monthly_savings)}`
+          : "Savings goal cleared",
+      );
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-md px-4 pt-4 pb-6 space-y-6">
+      <section className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div className="px-4 py-3 border-b border-border">
+          <h2 className="text-sm font-semibold">Monthly Savings Goal</h2>
+          <p className="mt-0.5 text-xs text-muted">
+            How much you want to set aside each month. The Add screen uses it
+            to show how much you can still spend per day:
+            (income − spent − savings) ÷ days left in the month.
+          </p>
+        </div>
+
+        {settings === null ? (
+          <p className="px-4 py-4 text-sm text-muted">Loading…</p>
+        ) : (
+          <form onSubmit={onSaveSavings} className="px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="e.g. 50000"
+                value={savingsInput}
+                onChange={(e) =>
+                  setSavingsInput(e.target.value.replace(/[^\d.]/g, ""))
+                }
+                disabled={savingSettings}
+                aria-label="Monthly savings goal (RSD)"
+                className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm tabular-nums outline-none focus:border-brand"
+              />
+              <span className="text-xs text-muted">RSD / month</span>
+            </div>
+            <button
+              type="submit"
+              disabled={!savingsValid || !savingsDirty || savingSettings}
+              className="w-full rounded-xl bg-brand py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              {settings.monthly_savings != null && savingsInput.trim() === ""
+                ? "Clear goal"
+                : "Save goal"}
+            </button>
+          </form>
+        )}
+
+        {settings?.monthly_savings != null ? (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-surface-2/40">
+            <span className="text-xs uppercase tracking-wide text-muted">
+              Current goal
+            </span>
+            <span className="text-sm font-semibold text-pos tabular-nums">
+              {formatRSD(settings.monthly_savings)}
+            </span>
+          </div>
+        ) : null}
+      </section>
+
       <section className="rounded-2xl border border-border bg-surface overflow-hidden">
         <div className="px-4 py-3 border-b border-border">
           <h2 className="text-sm font-semibold">Spaces</h2>

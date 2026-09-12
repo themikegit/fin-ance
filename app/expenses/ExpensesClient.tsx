@@ -48,6 +48,8 @@ export default function ExpensesClient() {
   const [members, setMembers] = useState<SpaceMemberView[]>([]);
   const [scope, setScope] = useState<Scope>({ kind: "personal" });
   const [month, setMonth] = useState<string>(currentMonthKey());
+  // null = all categories; "none" = uncategorized only; otherwise a category id.
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pendingIncomeDelete, setPendingIncomeDelete] = useState<string | null>(
     null,
@@ -162,6 +164,23 @@ export default function ExpensesClient() {
     [incomes, month],
   );
 
+  const hasUncategorized = useMemo(
+    () => monthExpenses.some((e) => !e.category_id),
+    [monthExpenses],
+  );
+  const filtering = categoryFilter !== null;
+  const visibleExpenses = useMemo(() => {
+    if (categoryFilter === null) return monthExpenses;
+    if (categoryFilter === "none") {
+      return monthExpenses.filter((e) => !e.category_id);
+    }
+    return monthExpenses.filter((e) => e.category_id === categoryFilter);
+  }, [monthExpenses, categoryFilter]);
+  const visibleTotal = visibleExpenses.reduce(
+    (s, e) => s + Number(e.amount),
+    0,
+  );
+
   const spent = monthExpenses.reduce((s, e) => s + Number(e.amount), 0);
   const incomeTotal = monthIncomes.reduce((s, i) => s + Number(i.amount), 0);
   const left = incomeTotal - spent;
@@ -272,19 +291,63 @@ export default function ExpensesClient() {
         <p className="text-sm text-muted">Loading…</p>
       ) : null}
 
-      <section className="rounded-2xl border border-border bg-surface overflow-hidden">
-        <div className="px-4 py-3 border-b border-border text-sm font-semibold">
-          Expenses
+      {categories.length > 0 || hasUncategorized ? (
+        <div
+          className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
+          role="group"
+          aria-label="Filter by category"
+        >
+          <FilterChip
+            label="All"
+            active={categoryFilter === null}
+            onClick={() => setCategoryFilter(null)}
+          />
+          {categories.map((c) => (
+            <FilterChip
+              key={c.id}
+              label={c.name}
+              color={categoryColor(c.id)}
+              active={categoryFilter === c.id}
+              onClick={() =>
+                setCategoryFilter((cur) => (cur === c.id ? null : c.id))
+              }
+            />
+          ))}
+          {hasUncategorized ? (
+            <FilterChip
+              label="Uncategorized"
+              color={categoryColor(null)}
+              active={categoryFilter === "none"}
+              onClick={() =>
+                setCategoryFilter((cur) => (cur === "none" ? null : "none"))
+              }
+            />
+          ) : null}
         </div>
-        {monthExpenses.length === 0 ? (
+      ) : null}
+
+      <section className="rounded-2xl border border-border bg-surface overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border text-sm font-semibold">
+          <span>Expenses</span>
+          {filtering ? (
+            <span className="text-xs font-medium text-muted">
+              {visibleExpenses.length} item
+              {visibleExpenses.length === 1 ? "" : "s"} ·{" "}
+              <span className="text-neg">−{formatRSD(visibleTotal)}</span>
+            </span>
+          ) : null}
+        </div>
+        {visibleExpenses.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-muted">
-            {inSpace
-              ? "No expenses in this space this month."
-              : "No expenses this month."}
+            {filtering
+              ? "No expenses in this category this month."
+              : inSpace
+                ? "No expenses in this space this month."
+                : "No expenses this month."}
           </p>
         ) : (
           <ul>
-            {monthExpenses.map((e) => {
+            {visibleExpenses.map((e) => {
               const byline = inSpace
                 ? memberNameByUserId.get(e.user_id) ?? "Member"
                 : null;
@@ -729,6 +792,40 @@ function EditExpenseSheet({
         </div>
       </div>
     </>
+  );
+}
+
+function FilterChip({
+  label,
+  color,
+  active,
+  onClick,
+}: {
+  label: string;
+  color?: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+        active
+          ? "border-foreground bg-foreground text-background"
+          : "border-border bg-surface text-muted hover:text-foreground"
+      }`}
+    >
+      {color ? (
+        <span
+          className="h-2 w-2 rounded-full"
+          style={{ background: color }}
+          aria-hidden
+        />
+      ) : null}
+      {label}
+    </button>
   );
 }
 

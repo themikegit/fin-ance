@@ -48,3 +48,8 @@ export type SpaceSummary = Space & {
 export type SpaceMemberView = SpaceMember & {
   display_name: string;
 };
+
+export type UserSettings = {
+  // Desired amount to set aside each month, in RSD. null = no goal.
+  monthly_savings: number | null;
+};

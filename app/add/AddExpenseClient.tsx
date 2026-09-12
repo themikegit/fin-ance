@@ -1,14 +1,28 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import CategoryGrid from "@/components/CategoryGrid";
 import MonthSwitcher from "@/components/MonthSwitcher";
 import Toast from "@/components/Toast";
-import { createExpense, createIncome, fetchCategories } from "@/lib/client";
+import {
+  createExpense,
+  createIncome,
+  fetchCategories,
+  fetchExpenses,
+  fetchIncomes,
+  fetchSettings,
+} from "@/lib/client";
 import type { Category } from "@/lib/categories";
-import type { IncomeKind } from "@/lib/types";
-import { currentMonthKey, formatRSD, monthToISO } from "@/lib/format";
+import type { Expense, Income, IncomeKind, UserSettings } from "@/lib/types";
+import {
+  currentMonthKey,
+  daysLeftInMonth,
+  formatRSD,
+  monthKey,
+  monthToISO,
+  sumIncomesForMonth,
+} from "@/lib/format";
 
 const QUICK = [500, 1000, 2000, 5000] as const;
 
@@ -23,6 +37,9 @@ export default function AddExpenseClient() {
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [expenses, setExpenses] = useState<Expense[] | null>(null);
+  const [incomes, setIncomes] = useState<Income[] | null>(null);
+  const [settings, setSettings] = useState<UserSettings | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -39,10 +56,43 @@ export default function AddExpenseClient() {
         // silent — show empty UI states
       }
     })();
+    (async () => {
+      // Budget data is best-effort: if any of it fails the form still works,
+      // we just hide the daily allowance card.
+      try {
+        const [exps, incs, st] = await Promise.all([
+          fetchExpenses(),
+          fetchIncomes(),
+          fetchSettings(),
+        ]);
+        if (cancelled) return;
+        setExpenses(exps);
+        setIncomes(incs);
+        setSettings(st);
+      } catch {
+        // silent
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // Daily allowance for the *current* calendar month (the month switcher
+  // below only affects where new entries are filed).
+  const budget = useMemo(() => {
+    if (!expenses || !incomes || !settings) return null;
+    const thisMonth = currentMonthKey();
+    const income = sumIncomesForMonth(incomes, thisMonth);
+    if (income <= 0) return null;
+    const spent = expenses
+      .filter((e) => monthKey(e.created_at) === thisMonth)
+      .reduce((s, e) => s + Number(e.amount), 0);
+    const savings = settings.monthly_savings ?? 0;
+    const left = income - spent - savings;
+    const daysLeft = daysLeftInMonth();
+    return { income, spent, savings, left, daysLeft, perDay: left / daysLeft };
+  }, [expenses, incomes, settings]);
 
   const numeric = Number.parseFloat(amount);
   const valid = Number.isFinite(numeric) && numeric > 0;
@@ -78,12 +128,13 @@ export default function AddExpenseClient() {
     setSaving(true);
     setError(null);
     try {
-      await createExpense({
+      const created = await createExpense({
         amount: numeric,
         category_id: category.id,
         name: name.trim() || null,
         created_at: createdAt,
       });
+      setExpenses((es) => (es ? [created, ...es] : es));
       setToast(`Saved ${formatRSD(numeric)}`);
       reset();
     } catch (e) {
@@ -97,7 +148,12 @@ export default function AddExpenseClient() {
     setSaving(true);
     setError(null);
     try {
-      await createIncome({ amount: numeric, kind, created_at: createdAt });
+      const created = await createIncome({
+        amount: numeric,
+        kind,
+        created_at: createdAt,
+      });
+      setIncomes((arr) => (arr ? [created, ...arr] : arr));
       setToast(`Income ${formatRSD(numeric)}`);
       reset();
     } catch (e) {
@@ -113,6 +169,36 @@ export default function AddExpenseClient() {
 
   return (
     <div className="mx-auto max-w-md px-4 pt-4">
+      {budget ? (
+        <div
+          className={`mb-4 rounded-2xl border px-4 py-3 ${
+            budget.left >= 0
+              ? "border-border bg-surface"
+              : "border-neg/40 bg-neg/5"
+          }`}
+        >
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="text-xs font-medium uppercase tracking-wide text-muted">
+              Left to spend per day
+            </div>
+            <div
+              className={`text-xl font-bold tabular-nums ${
+                budget.left >= 0 ? "text-pos" : "text-neg"
+              }`}
+            >
+              {formatRSD(budget.perDay)}
+            </div>
+          </div>
+          <div className="mt-1 text-xs text-muted">
+            {formatRSD(budget.left)} left this month · {budget.daysLeft} day
+            {budget.daysLeft === 1 ? "" : "s"} to go
+            {budget.savings > 0
+              ? ` · after ${formatRSD(budget.savings)} savings`
+              : ""}
+          </div>
+        </div>
+      ) : null}
+
       <label
         htmlFor="amount"
         className="block text-xs font-medium uppercase tracking-wide text-muted mb-2"

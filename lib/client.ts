@@ -7,6 +7,7 @@ import type {
   IncomeKind,
   SpaceSummary,
   SpaceMemberView,
+  UserSettings,
 } from "./types";
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
@@ -177,4 +178,22 @@ export async function updateCategory(
 export async function deleteCategory(id: string): Promise<void> {
   const res = await fetch(`/api/categories/${id}`, { method: "DELETE" });
   await jsonOrThrow<{ ok: true }>(res);
+}
+
+export async function fetchSettings(): Promise<UserSettings> {
+  const res = await fetch("/api/settings", { cache: "no-store" });
+  const data = await jsonOrThrow<{ settings: UserSettings }>(res);
+  return data.settings;
+}
+
+export async function updateSettings(
+  patch: Partial<UserSettings>,
+): Promise<UserSettings> {
+  const res = await fetch("/api/settings", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const data = await jsonOrThrow<{ settings: UserSettings }>(res);
+  return data.settings;
 }
