@@ -2,12 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Plus, ListChecks, BarChart3, Settings } from "lucide-react";
+import {
+  Plus,
+  ListChecks,
+  BarChart3,
+  LayoutDashboard,
+  Settings,
+} from "lucide-react";
 
 const TABS = [
   { href: "/add", label: "Add", Icon: Plus },
   { href: "/expenses", label: "Expenses", Icon: ListChecks },
   { href: "/analytics", label: "Stats", Icon: BarChart3 },
+  { href: "/overview", label: "Overview", Icon: LayoutDashboard },
   { href: "/settings", label: "Settings", Icon: Settings },
 ] as const;
 
@@ -18,7 +25,7 @@ export default function BottomNav() {
       className="fixed bottom-0 inset-x-0 z-40 border-t border-border bg-surface/95 backdrop-blur safe-pb"
       aria-label="Primary"
     >
-      <ul className="mx-auto max-w-md grid grid-cols-4">
+      <ul className="mx-auto max-w-md grid grid-cols-5">
         {TABS.map(({ href, label, Icon }) => {
           const active =
             pathname === href || pathname.startsWith(`${href}/`);

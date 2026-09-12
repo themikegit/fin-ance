@@ -51,6 +51,7 @@ app/
   add/                    primary view (amount → category bottom sheet)
   expenses/               list grouped by month, collapsible
   analytics/              donut + daily bar + top expenses + MoM
+  overview/               all-months dashboard: totals, last month, trend, stats
   settings/               income management, sign-out
   sign-in/[[...sign-in]]/ Clerk SignIn
   sign-up/[[...sign-up]]/ Clerk SignUp
